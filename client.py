@@ -227,7 +227,7 @@ class UTNInscripcionClient:
             s_clean = ''.join(c for c in s_norm if unicodedata.category(c) != 'Mn')
             return re.sub(r'[^a-z0-9\s]', '', s_clean.lower()).strip()
 
-        stop_words = {"de", "del", "la", "el", "en", "para", "con", "y", "los", "las", "software", "desarrollo", "ingenieria", "tecnologias"}
+        stop_words = {"de", "del", "la", "el", "en", "para", "con", "y", "los", "las", "un", "una"}
 
         codes = []
         
@@ -239,56 +239,82 @@ class UTNInscripcionClient:
                 mat_target = normalize_str(mat_target_raw)
                 mat_code = sel.get("codigo", "")
                 
-                # Soporta curso como string ("4K2") o como lista con opciones de reserva (["4K2", "4K1"])
                 curso_val = sel.get("curso", "")
                 if isinstance(curso_val, list):
                     cursos_target = [c.strip().upper() for c in curso_val]
                 else:
                     cursos_target = [str(curso_val).strip().upper()]
                 
-                target_words = [w for w in mat_target.split() if w not in stop_words and len(w) > 2]
-                if not target_words:
-                    target_words = [w for w in mat_target.split() if len(w) > 2]
+                words = [w for w in mat_target.split() if w not in stop_words and len(w) >= 3]
+                if not words:
+                    words = [w for w in mat_target.split() if len(w) >= 3]
 
-                found = False
+                found_materia = None
+                
                 for m in self.materias_cache:
                     m_codigo = m.get("CODIGO", "")
                     m_nombre = normalize_str(m.get("Name", ""))
                     
-                    match_code = bool(mat_code and m_codigo == mat_code)
-                    match_name = bool(mat_target and mat_target in m_nombre)
-                    if not match_name and target_words:
-                        match_name = all(w in m_nombre for w in target_words)
-                    
-                    if match_code or match_name:
-                        struct_list = self.parse_structure(m.get("Structure", ""))
-                        
-                        # Buscar según orden de preferencia de cursos
-                        for curso_target in cursos_target:
-                            for st in struct_list:
-                                rest = st["rest"].upper()
-                                if rest.startswith(curso_target) or (curso_target in rest[:6]):
-                                    full_code = f"{m_codigo}{st['comision_code']}"
-                                    codes.append(full_code)
-                                    found = True
-                                    print(f"[✔] Resuelto en Vivo: {m.get('Name')} (Curso: {curso_target}) -> Código: {full_code}")
-                                    break
-                            if found:
-                                break
-                    if found:
+                    if mat_code and m_codigo == mat_code:
+                        found_materia = m
                         break
                         
-                if not found:
+                    if mat_target and all(w in m_nombre for w in words):
+                        found_materia = m
+                        break
+                        
+                if not found_materia:
+                    key_words = [w for w in words if w in {"devops", "seguridad", "automatizacion", "calidad"}]
+                    for m in self.materias_cache:
+                        m_nombre = normalize_str(m.get("Name", ""))
+                        if any(kw in m_nombre for kw in key_words):
+                            found_materia = m
+                            break
+
+                if found_materia:
+                    m_codigo = found_materia.get("CODIGO", "")
+                    struct_list = self.parse_structure(found_materia.get("Structure", ""))
+                    
+                    found_course = False
+                    for curso_target in cursos_target:
+                        # Extraer número de comisión deseada (ej: "4K2" -> "2", "5K4" -> "4", "4K2A" -> "2")
+                        m_num = re.search(r"(\d+)(?=[A-Za-z]?$)", curso_target)
+                        target_num = m_num.group(1) if m_num else ""
+                        
+                        for st in struct_list:
+                            rest = st["rest"].upper()
+                            com_num = str(int(st["comision_code"]))
+                            
+                            match_exact = rest.startswith(curso_target) or (curso_target in rest[:6])
+                            match_num = bool(target_num and com_num == target_num)
+                            
+                            if match_exact or match_num:
+                                full_code = f"{m_codigo}{st['comision_code']}"
+                                codes.append(full_code)
+                                found_course = True
+                                print(f"[✔] Resuelto en Vivo: {found_materia.get('Name')} (Curso: {curso_target}) -> Código: {full_code}")
+                                break
+                        if found_course:
+                            break
+                            
+                    # Si no hay estructura disponible en HAR fallback, usar comisión inferida por defecto
+                    if not found_course and not struct_list:
+                        for curso_target in cursos_target:
+                            m_num = re.search(r"(\d+)(?=[A-Za-z]?$)", curso_target)
+                            if m_num:
+                                com_code = m_num.group(1).zfill(3)
+                                full_code = f"{m_codigo}{com_code}"
+                                codes.append(full_code)
+                                print(f"[✔] Resuelto por Inferencia: {found_materia.get('Name')} (Curso: {curso_target}) -> Código: {full_code}")
+                                break
+                else:
                     print(f"[!] ADVERTENCIA: No se pudo resolver en la oferta actual: {sel}")
 
-                    
-        return "|".join(codes)
-     
-        return "|".join(codes)
 
-
+        return "|".join(codes)
 
     def enviar_inscripcion(self, payload_materia: str) -> Dict[str, Any]:
+
         """
         Envía la petición final de inscripción HTTP POST a Autogestión 4.
         """
