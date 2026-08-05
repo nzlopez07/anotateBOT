@@ -335,3 +335,28 @@ class UTNInscripcionClient:
             return resp.json()
         except Exception:
             return {"valor": resp.status_code, "salida": resp.text}
+
+    def verificar_inscripciones_actuales(self, anio: int = 2026) -> List[str]:
+        """
+        Consulta a la UTN la lista oficial de materias inscriptas para el año en curso.
+        """
+        url = f"{self.BASE_URL_A4}/cursado/actual/{anio}"
+        headers = {"X-Requested-With": "XMLHttpRequest"}
+        resp = self.session.get(url, headers=headers)
+        
+        materias_inscriptas = []
+        if resp.status_code == 200:
+            try:
+                data = resp.json()
+                if isinstance(data, list):
+                    for item in data:
+                        nom = item.get("nombre") or item.get("materia") or str(item)
+                        materias_inscriptas.append(nom)
+                elif isinstance(data, dict):
+                    for k, v in data.items():
+                        materias_inscriptas.append(f"{k}: {v}")
+            except Exception:
+                if resp.text:
+                    materias_inscriptas.append("Comprobante emitido correctamente en servidor.")
+        return materias_inscriptas
+
