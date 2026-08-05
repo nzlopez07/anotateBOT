@@ -238,20 +238,15 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
                 
         time.sleep(1.0)
 
-    os.system('cls' if os.name == 'nt' else 'clear')
-    print_header()
-    print("[+] Refrescando GUID final a 5s del objetivo...")
     guid, materias = client.get_comisiones()
     payload_final = client.resolve_materia_payload(list(deseadas) + list(directas))
     if payload_final:
         payload = payload_final
         
-    print(f"  • GUID: {client.guid}")
-    print(f"  • Payload: {payload}")
-    
     # Espera activa sub-milisegundo
     while datetime.now() < target_dt:
         pass
+
         
     shot_count = 0
     last_heartbeat = datetime.now()
@@ -282,28 +277,33 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
             if not ("Inscripcion Definitiva" in val_str or "1|" in val_str or "ACEPTADA" in val_str.upper()):
                 missing_sel.append(sel)
                 
-        # 4. Imprimir resumen visual en pantalla limpia
-        os.system('cls' if os.name == 'nt' else 'clear')
-        print_header()
-        print(f" [ {datetime.now().strftime('%H:%M:%S')} ] | RAFAGA #{shot_count} | MONITOREO ACTIVO")
-        print("=" * 65)
-        print("MATERIAS INSCRIPTAS / CONFIRMADAS EN AUTOGESTION UTN:")
-        if inscriptas_oficiales:
-            for ins in inscriptas_oficiales:
-                print(f"  [✔] {ins}")
-        else:
-            print("  [✔] 5 Materias Inscriptas Manualmente en Autogestion")
-            
-        print("\nMATERIAS PENDIENTES DE CUPO (Buscando vacante en vivo):")
-        if missing_sel:
-            for m in missing_sel:
-                m_nombre = m.get("materia", "")
-                m_curso = str(m.get("curso", ""))
-                print(f"  [❌] {m_nombre} ({m_curso}) -> SIN CUPO (Reintentando en 5s...)")
-        else:
-            print("  (Ninguna pendiente - 100% Completado)")
-            
-        print("=" * 65)
+    # 4. Imprimir resumen visual en pantalla limpia
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print_header()
+    print(f" [ {datetime.now().strftime('%H:%M:%S')} ] | RAFAGA #{shot_count} | MONITOREO ACTIVO")
+    print("=" * 65)
+    print("MATERIAS CONFIRMADAS EN TU AUTOGESTION (UTN FRC):")
+    if inscriptas_oficiales:
+        for ins in inscriptas_oficiales:
+            print(f"  [✔] {ins}")
+    else:
+        print("  [✔] Ingeniería y Calidad de Software (4K2)")
+        print("  [✔] Tecnologías para la Automatización (4K2)")
+        print("  [✔] Seguridad en el Desarrollo de Software (4K3A)")
+        print("  [✔] Investigación Operativa (4K2)")
+        print("  [✔] Administración de Sistemas de Información (4K2)")
+        
+    print("\nMATERIAS PENDIENTES DE CUPO (Buscando vacante en vivo):")
+    if missing_sel:
+        for m in missing_sel:
+            m_nombre = m.get("materia", "")
+            m_curso = str(m.get("curso", ""))
+            print(f"  [❌] {m_nombre} ({m_curso}) -> SIN CUPO (Reintentando en 5s...)")
+    else:
+        print("  (Ninguna pendiente - 100% Completado)")
+        
+    print("=" * 65)
+
 
         # Si NO faltan materias (todas conseguidas), finalizar ciclo con gran alerta a Telegram
         if not missing_sel:
