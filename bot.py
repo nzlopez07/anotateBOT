@@ -145,7 +145,19 @@ def cmd_list(client: UTNInscripcionClient, config: Dict[str, Any], watch: bool =
             current_snapshot = "\n".join(current_snapshot_lines)
             if watch and previous_snapshot and current_snapshot != previous_snapshot:
                 if client.telegram_token:
-                    client.send_telegram(f"🔔 *anotateBOT: ¡CAMBIO DETECTADO EN LA OFERTA VIVA!*\nRevisá la consola del bot para ver los nuevos cursos abiertos.")
+                    # Calcular la diferencia exacta entre snapshots
+                    prev_set = set(previous_snapshot.split("\n"))
+                    curr_set = set(current_snapshot.split("\n"))
+                    diff_added = curr_set - prev_set
+                    diff_removed = prev_set - curr_set
+                    
+                    diff_text = ""
+                    if diff_added:
+                        diff_text += "\n➕ *Nuevos/Modificados:*\n" + "\n".join([f"• {x}" for x in diff_added])
+                    if diff_removed:
+                        diff_text += "\n➖ *Retirados:*\n" + "\n".join([f"• {x}" for x in diff_removed])
+                        
+                    client.send_telegram(f"🔔 *anotateBOT: ¡CAMBIO DETECTADO EN LA OFERTA VIVA!*{diff_text}")
             previous_snapshot = current_snapshot
 
         if not watch:
