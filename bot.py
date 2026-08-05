@@ -239,32 +239,6 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
     payload_final = client.resolve_materia_payload(list(deseadas) + list(directas))
     if payload_final:
         payload = payload_final
-           # Reintento selectivo automático para materias faltantes (sin tocar las ya conseguidas)
-        if missing_sel:
-            missing_payload = client.resolve_materia_payload(missing_sel)
-            if missing_payload:
-                print(f"\n[+] REINTENTO SELECTIVO ACTIVADO para materias pendientes: {missing_payload}")
-                print("    (Las materias ya conseguidas estan 100% seguras y no se modifican)")
-                client.send_telegram(f"anotateBOT: Reintentando solo materias pendientes sin modificar las ya conseguidas -> `{missing_payload}`")
-                
-                for r_idx in range(3):
-                    time.sleep(3)
-                    r_res = client.enviar_inscripcion(missing_payload)
-                    print(f"  [Reintento {r_idx+1}] {r_res['time_ms']} ms | Status: {r_res['status_code']}")
-                    if "OK" in r_res['raw_response'] or "0|2" in r_res['raw_response']:
-                        print(f"[✔] Reintento exitoso para materias pendientes!")
-                        client.send_telegram(f"anotateBOT: Reintento exitoso -> {r_res['raw_response'][:200]}")
-                        break
-
-    # Verificación oficial del comprobante en la base de datos de la UTN
-    print("\n[+] VERIFICANDO COMPROBANTE OFICIAL DE INSCRIPCION EN UTN...")
-    time.sleep(2)
-    inscriptas = client.verificar_inscripciones_actuales()
-    if inscriptas:
-        print("[✔] COMPROBANTE OFICIAL CONFIRMADO EN SERVIDOR:")
-        for ins in inscriptas:
-            print(f"  • {ins}")
-        client.send_telegram("🎉 *COMPROBANTE UTN CONFIRMADO EN SERVIDOR*\nPuedes ingresar ahora a Autogestion a descargar tu PDF.")
         
     print(f"  • GUID: {client.guid}")
     print(f"  • Payload: {payload}")
@@ -275,7 +249,8 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
         
     shot_time = datetime.now().strftime('%H:%M:%S.%f')[:-3]
     print(f"\n[+] Disparando rafaga a las {shot_time}...")
-    client.send_telegram(f"anotateBOT: Disparando inscripcion a las {shot_time}")
+    if client.telegram_token:
+        client.send_telegram(f"anotateBOT: Disparando inscripcion a las {shot_time}")
     
     results = []
     petition_ids = []
@@ -301,6 +276,10 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
     for b in breakdown:
         print(f"  {b}")
         
+    tg_breakdown_str = "\n".join(breakdown)
+    if client.telegram_token:
+        client.send_telegram(f"anotateBOT: Inscripcion Enviada en {res_first['time_ms']} ms!\n\n{tg_breakdown_str}")
+    
     if petition_ids:
         pet_id = petition_ids[0]
         print(f"\n[+] Verificando estado de cola para ticket: {pet_id}")
@@ -311,18 +290,46 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
             print(f"  [Cola] {salida}")
             if "INSC" in salida.upper() or "POSICION" in salida.upper() or "ACEPTADA" in salida.upper():
                 print(f"\n[✔] ESTADO FINAL DE COLA: {salida}")
-                client.send_telegram(f"anotateBOT: Estado de Inscripcion en Cola -> {salida}")
+                if client.telegram_token:
+                    client.send_telegram(f"anotateBOT: Estado de Inscripcion en Cola -> {salida}")
                 break
+
+    # Reintento selectivo para materias pendientes
+    missing_sel = []
+    for sel in deseadas:
+        code_res = client.resolve_materia_payload([sel])
+        if not code_res or code_res not in res_first['raw_response']:
+            missing_sel.append(sel)
+            
+    if missing_sel:
+        missing_payload = client.resolve_materia_payload(missing_sel)
+        if missing_payload:
+            print(f"\n[+] REINTENTO SELECTIVO ACTIVADO para materias pendientes: {missing_payload}")
+            print("    (Las materias ya conseguidas estan 100% seguras y no se modifican)")
+            if client.telegram_token:
+                client.send_telegram(f"anotateBOT: Reintentando materias pendientes -> `{missing_payload}`")
+            
+            for r_idx in range(3):
+                time.sleep(3)
+                r_res = client.enviar_inscripcion(missing_payload)
+                print(f"  [Reintento {r_idx+1}] {r_res['time_ms']} ms | Status: {r_res['status_code']}")
+                if "OK" in r_res['raw_response'] or "0|2" in r_res['raw_response']:
+                    print(f"[✔] Reintento exitoso para materias pendientes!")
+                    if client.telegram_token:
+                        client.send_telegram(f"anotateBOT: Reintento exitoso -> {r_res['raw_response'][:200]}")
+                    break
 
     # Verificación del comprobante oficial en el servidor de la UTN
     print("\n[+] VERIFICANDO COMPROBANTE OFICIAL DE INSCRIPCION EN UTN...")
-    time.sleep(2)
+    time.sleep(1)
     inscriptas = client.verificar_inscripciones_actuales()
     if inscriptas:
         print("\n[✔] COMPROBANTE OFICIAL CONFIRMADO EN SERVIDOR DE LA UTN:")
         for ins in inscriptas:
             print(f"  • {ins}")
-        client.send_telegram("🎉 *COMPROBANTE UTN CONFIRMADO EN SERVIDOR*\nPuedes ingresar a Autogestion a descargar tu comprobante en PDF.")
+        if client.telegram_token:
+            client.send_telegram("🎉 *COMPROBANTE UTN CONFIRMADO EN SERVIDOR*\nPuedes ingresar a Autogestion a descargar tu comprobante en PDF.")
+
 
 def cmd_demo(client: UTNInscripcionClient, config: Dict[str, Any]):
 
