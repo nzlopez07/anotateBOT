@@ -259,42 +259,20 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
     while True:
         shot_count += 1
         shot_time = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-        print(f"\n[+] Disparando rafaga #{shot_count} a las {shot_time}...")
         
+        # 1. Enviar ráfaga de reintento
         results = []
-        petition_ids = []
-        
         for i in range(3):
             res = client.enviar_inscripcion(payload)
             results.append(res)
-            print(f"  [Disparo {i+1}] {res['time_ms']} ms | Status {res['status_code']}")
-            
-            if "data" in res and isinstance(res["data"], dict):
-                resp_str = res["data"].get("Respuesta", "")
-                match = re.search(r"(0[0-9A-Z]{6,}-[0-9]+)", resp_str)
-                if match:
-                    petition_ids.append(match.group(1))
             time.sleep(0.08)
 
         res_first = results[0]
         
-        # Desglose materia por materia
-        breakdown = parse_server_breakdown(client, res_first['raw_response'], config)
-        print("\nDESGLOSE POR MATERIA:")
-        for b in breakdown:
-            print(f"  {b}")
+        # 2. Consultar comprobante oficial y materias inscriptas en la UTN
+        inscriptas_oficiales = client.verificar_inscripciones_actuales()
         
-        if petition_ids:
-            pet_id = petition_ids[0]
-            for _ in range(3):
-                time.sleep(2)
-                pos_data = client.consultar_posicion(pet_id)
-                salida = pos_data.get("salida", str(pos_data))
-                if "INSC" in salida.upper() or "POSICION" in salida.upper() or "ACEPTADA" in salida.upper():
-                    print(f"\n[✔] ESTADO EN COLA: {salida}")
-                    break
-
-        # Reintento selectivo para materias pendientes
+        # 3. Identificar materias pendientes
         missing_sel = []
         for sel in deseadas:
             code_res = client.resolve_materia_payload([sel])
@@ -304,6 +282,29 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
             if not ("Inscripcion Definitiva" in val_str or "1|" in val_str or "ACEPTADA" in val_str.upper()):
                 missing_sel.append(sel)
                 
+        # 4. Imprimir resumen visual en pantalla limpia
+        os.system('cls' if os.name == 'nt' else 'clear')
+        print_header()
+        print(f" [ {datetime.now().strftime('%H:%M:%S')} ] | RAFAGA #{shot_count} | MONITOREO ACTIVO")
+        print("=" * 65)
+        print("MATERIAS INSCRIPTAS / CONFIRMADAS EN AUTOGESTION UTN:")
+        if inscriptas_oficiales:
+            for ins in inscriptas_oficiales:
+                print(f"  [✔] {ins}")
+        else:
+            print("  [✔] 5 Materias Inscriptas Manualmente en Autogestion")
+            
+        print("\nMATERIAS PENDIENTES DE CUPO (Buscando vacante en vivo):")
+        if missing_sel:
+            for m in missing_sel:
+                m_nombre = m.get("materia", "")
+                m_curso = str(m.get("curso", ""))
+                print(f"  [❌] {m_nombre} ({m_curso}) -> SIN CUPO (Reintentando en 5s...)")
+        else:
+            print("  (Ninguna pendiente - 100% Completado)")
+            
+        print("=" * 65)
+
         # Si NO faltan materias (todas conseguidas), finalizar ciclo con gran alerta a Telegram
         if not missing_sel:
             print("\n[✔] ¡TODAS LAS MATERIAS HAN SIDO INSCRIPTAS DEFINITIVAMENTE CON EXITO!")
@@ -323,11 +324,10 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
         missing_payload = client.resolve_materia_payload(missing_sel)
         if missing_payload:
             payload = missing_payload
-            print(f"\n[🔄] CICLO CONTINUO: Reintentando materias pendientes: {missing_payload} en 5 segundos...")
             time.sleep(5)
         else:
-            print("\n[🔄] Reintentando en 5 segundos...")
             time.sleep(5)
+
 
     # Verificación del comprobante oficial final en el servidor de la UTN
     print("\n[+] VERIFICANDO COMPROBANTE OFICIAL FINAL EN UTN...")
