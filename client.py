@@ -311,7 +311,9 @@ class UTNInscripcionClient:
                     print(f"[!] ADVERTENCIA: No se pudo resolver en la oferta actual: {sel}")
 
 
-        return "|".join(codes)
+        unique_codes = list(dict.fromkeys(codes))
+        return "|".join(unique_codes)
+
 
     def enviar_inscripcion(self, payload_materia: str) -> Dict[str, Any]:
 
