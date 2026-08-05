@@ -1,6 +1,7 @@
 import json
 import time
 import re
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple
 import requests
 
@@ -35,7 +36,7 @@ class UTNInscripcionClient:
             try:
                 from email.utils import parsedate_to_datetime
                 server_dt = parsedate_to_datetime(date_str).replace(tzinfo=None)
-                local_dt = datetime.utcnow()
+                local_dt = datetime.now(timezone.utc).replace(tzinfo=None)
                 self.server_clock_offset_seconds = (server_dt - local_dt).total_seconds()
                 # print(f"⏱️ Sync Reloj UTN: Desfase detectado = {round(self.server_clock_offset_seconds, 3)}s")
             except Exception:
