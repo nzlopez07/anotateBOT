@@ -292,7 +292,6 @@ class UTNInscripcionClient:
                                 full_code = f"{m_codigo}{st['comision_code']}"
                                 codes.append(full_code)
                                 found_course = True
-                                print(f"[✔] Resuelto en Vivo: {found_materia.get('Name')} (Curso: {curso_target}) -> Código: {full_code}")
                                 break
                         if found_course:
                             break
@@ -305,8 +304,8 @@ class UTNInscripcionClient:
                                 com_code = m_num.group(1).zfill(3)
                                 full_code = f"{m_codigo}{com_code}"
                                 codes.append(full_code)
-                                print(f"[✔] Resuelto por Inferencia: {found_materia.get('Name')} (Curso: {curso_target}) -> Código: {full_code}")
                                 break
+
                 else:
                     print(f"[!] ADVERTENCIA: No se pudo resolver en la oferta actual: {sel}")
 
