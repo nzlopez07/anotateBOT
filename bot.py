@@ -62,8 +62,6 @@ def parse_server_breakdown(client: UTNInscripcionClient, raw_response: str, conf
     lines = []
     deseadas = config.get("comisiones_deseadas", [])
     
-    is_sin_cupo = "SIN LUGAR" in raw_response.upper() or "SIN CUPO" in raw_response.upper() or "RESPUESTA\":\"0" in raw_response.replace(" ", "")
-    
     for sel in deseadas:
         mat_name = sel.get("materia", "Materia")
         curso = sel.get("curso", "")
@@ -72,14 +70,21 @@ def parse_server_breakdown(client: UTNInscripcionClient, raw_response: str, conf
             
         code_resolved = client.resolve_materia_payload([sel])
         
-        if is_sin_cupo:
+        # Verificar estado oficial directo en el servidor de la UTN
+        verif = client.verificar_posicion_materia(code_resolved) if code_resolved else {}
+        val_str = str(verif.get("value", ""))
+        
+        if "Inscripcion Definitiva" in val_str or "1|" in val_str or "ACEPTADA" in val_str.upper():
+            lines.append(f"[✔] {mat_name} ({curso}): INSCRIPCION DEFINITIVA CONFIRMADA (Codigo: {code_resolved})")
+        elif "SIN LUGAR" in raw_response.upper() or "SIN CUPO" in raw_response.upper() or "RESPUESTA\":\"0" in raw_response.replace(" ", ""):
             lines.append(f"[❌] {mat_name} ({curso}): SIN CUPO DISPONIBLE (Reintentando...)")
-        elif code_resolved and ("OK" in raw_response.upper() or "0|2" in raw_response or "302" in str(raw_response)):
-            lines.append(f"[✔] {mat_name} ({curso}): INSCRIPTO / EN COLA DISPARADA (Codigo: {code_resolved})")
+        elif code_resolved:
+            lines.append(f"[❌] {mat_name} ({curso}): SIN CUPO O PENDIENTE DE LIBERACION (Codigo: {code_resolved})")
         else:
-            lines.append(f"[❌] {mat_name} ({curso}): SIN CUPO O RECHAZADO POR SERVIDOR")
+            lines.append(f"[❌] {mat_name} ({curso}): NO FIGURA EN LA OFERTA VIVA")
             
     return lines
+
 
 
 def cmd_list(client: UTNInscripcionClient, config: Dict[str, Any]):

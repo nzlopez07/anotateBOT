@@ -365,7 +365,24 @@ class UTNInscripcionClient:
         except Exception:
             return {"valor": resp.status_code, "salida": resp.text}
 
+    def verificar_posicion_materia(self, codigo_materia: str) -> Dict[str, Any]:
+        """
+        Consulta a la UTN si una materia específica tiene Inscripción Definitiva o Posición en cola.
+        Endpoint oficial: POST /transacciones/inscripcion/cursado/posicion/materia
+        """
+        url = f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/posicion/materia"
+        headers = {"X-Requested-With": "XMLHttpRequest"}
+        data = {"materia": codigo_materia}
+        
+        resp = self.session.post(url, data=data, headers=headers)
+        try:
+            return resp.json()
+        except Exception:
+            return {"value": resp.text}
+
     def verificar_inscripciones_actuales(self, anio: int = 2026) -> List[str]:
+
+
         """
         Consulta a la UTN la lista oficial de materias inscriptas para el año en curso.
         """
