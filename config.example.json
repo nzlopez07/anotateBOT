@@ -1,0 +1,26 @@
+{
+  "usuario": "TU_LEGAJO",
+  "dominio": "sistemas",
+  "clave": "TU_CLAVE",
+  "telegram_token": "OPCIONAL_TOKEN_BOT_TELEGRAM",
+  "telegram_chat_id": "OPCIONAL_CHAT_ID_TELEGRAM",
+  "comisiones_deseadas": [
+    {
+      "materia": "Tecnologias para la Automatizacion",
+      "curso": "4K2"
+    },
+    {
+      "materia": "Ingenieria y Calidad de Software",
+      "curso": "4K2"
+    },
+    {
+      "materia": "Seguridad en el Desarrollo de Software",
+      "curso": ["5K4", "4K2A"]
+    },
+    {
+      "materia": "DevOps",
+      "curso": "4K4"
+    }
+  ],
+  "codigos_directos": []
+}

@@ -1,0 +1,10 @@
+# Archivo de configuracion local con credenciales
+config.json
+
+# Archivos de captura y temporales
+*.har
+*.log
+__pycache__/
+*.pyc
+.env
+scratch/
