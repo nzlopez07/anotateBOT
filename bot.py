@@ -188,7 +188,9 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
     payload = client.resolve_materia_payload(list(deseadas) + list(directas))
     
     if client.telegram_token:
-        client.send_telegram(f"anotateBOT Iniciado | Legajo: {config['usuario']} | Objetivo: {target_time_str}")
+        obj_text = target_time_str if target_time_str else "Inmediato (Modo Continuo)"
+        client.send_telegram(f"🟢 anotateBOT Iniciado | Legajo: {config['usuario']} | Modo: {obj_text}")
+
 
     print("\n" + "=" * 65)
     print("ESTADO DEL MONITOR:")
