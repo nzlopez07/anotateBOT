@@ -247,77 +247,78 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
     while datetime.now() < target_dt:
         pass
         
-    shot_time = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-    print(f"\n[+] Disparando rafaga a las {shot_time}...")
-    if client.telegram_token:
-        client.send_telegram(f"anotateBOT: Disparando inscripcion a las {shot_time}")
-    
-    results = []
-    petition_ids = []
-    
-    for i in range(3):
-        res = client.enviar_inscripcion(payload)
-        results.append(res)
-        print(f"  [Disparo {i+1}] {res['time_ms']} ms | Status {res['status_code']}")
+    shot_count = 0
+    while True:
+        shot_count += 1
+        shot_time = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+        print(f"\n[+] Disparando rafaga #{shot_count} a las {shot_time}...")
+        if client.telegram_token:
+            client.send_telegram(f"anotateBOT: Disparando rafaga #{shot_count} a las {shot_time}")
         
-        if "data" in res and isinstance(res["data"], dict):
-            resp_str = res["data"].get("Respuesta", "")
-            match = re.search(r"(0[0-9A-Z]{6,}-[0-9]+)", resp_str)
-            if match:
-                petition_ids.append(match.group(1))
-        time.sleep(0.08)
-
-    res_first = results[0]
-    print(f"\n[✔] Respuesta del servidor ({res_first['time_ms']} ms)")
-    
-    # Desglose materia por materia
-    breakdown = parse_server_breakdown(client, res_first['raw_response'], config)
-    print("\nDESGLOSE POR MATERIA:")
-    for b in breakdown:
-        print(f"  {b}")
+        results = []
+        petition_ids = []
         
-    tg_breakdown_str = "\n".join(breakdown)
-    if client.telegram_token:
-        client.send_telegram(f"anotateBOT: Inscripcion Enviada en {res_first['time_ms']} ms!\n\n{tg_breakdown_str}")
-    
-    if petition_ids:
-        pet_id = petition_ids[0]
-        print(f"\n[+] Verificando estado de cola para ticket: {pet_id}")
-        for _ in range(5):
-            time.sleep(2)
-            pos_data = client.consultar_posicion(pet_id)
-            salida = pos_data.get("salida", str(pos_data))
-            print(f"  [Cola] {salida}")
-            if "INSC" in salida.upper() or "POSICION" in salida.upper() or "ACEPTADA" in salida.upper():
-                print(f"\n[✔] ESTADO FINAL DE COLA: {salida}")
-                if client.telegram_token:
-                    client.send_telegram(f"anotateBOT: Estado de Inscripcion en Cola -> {salida}")
-                break
-
-    # Reintento selectivo para materias pendientes
-    missing_sel = []
-    for sel in deseadas:
-        code_res = client.resolve_materia_payload([sel])
-        if not code_res or code_res not in res_first['raw_response']:
-            missing_sel.append(sel)
+        for i in range(3):
+            res = client.enviar_inscripcion(payload)
+            results.append(res)
+            print(f"  [Disparo {i+1}] {res['time_ms']} ms | Status {res['status_code']}")
             
-    if missing_sel:
+            if "data" in res and isinstance(res["data"], dict):
+                resp_str = res["data"].get("Respuesta", "")
+                match = re.search(r"(0[0-9A-Z]{6,}-[0-9]+)", resp_str)
+                if match:
+                    petition_ids.append(match.group(1))
+            time.sleep(0.08)
+
+        res_first = results[0]
+        print(f"\n[✔] Respuesta del servidor ({res_first['time_ms']} ms)")
+        
+        # Desglose materia por materia
+        breakdown = parse_server_breakdown(client, res_first['raw_response'], config)
+        print("\nDESGLOSE POR MATERIA:")
+        for b in breakdown:
+            print(f"  {b}")
+            
+        tg_breakdown_str = "\n".join(breakdown)
+        if client.telegram_token:
+            client.send_telegram(f"anotateBOT Rafaga #{shot_count}: Respuesta ({res_first['time_ms']} ms)\n\n{tg_breakdown_str}")
+        
+        if petition_ids:
+            pet_id = petition_ids[0]
+            print(f"\n[+] Verificando estado de cola para ticket: {pet_id}")
+            for _ in range(3):
+                time.sleep(2)
+                pos_data = client.consultar_posicion(pet_id)
+                salida = pos_data.get("salida", str(pos_data))
+                print(f"  [Cola] {salida}")
+                if "INSC" in salida.upper() or "POSICION" in salida.upper() or "ACEPTADA" in salida.upper():
+                    print(f"\n[✔] ESTADO EN COLA: {salida}")
+                    if client.telegram_token:
+                        client.send_telegram(f"anotateBOT: Estado de Cola -> {salida}")
+                    break
+
+        # Reintento selectivo para materias pendientes
+        missing_sel = []
+        for sel in deseadas:
+            code_res = client.resolve_materia_payload([sel])
+            if not code_res or code_res not in res_first['raw_response']:
+                missing_sel.append(sel)
+                
+        # Si NO faltan materias (todas conseguidas), finalizar ciclo
+        if not missing_sel:
+            print("\n[✔] ¡TODAS LAS MATERIAS HAN SIDO PROCESADAS EXITOSAMENTE!")
+            break
+            
+        # Si faltan materias, actualizar el payload solo para las faltantes y reintentar en bucle continuo
         missing_payload = client.resolve_materia_payload(missing_sel)
         if missing_payload:
-            print(f"\n[+] REINTENTO SELECTIVO ACTIVADO para materias pendientes: {missing_payload}")
-            print("    (Las materias ya conseguidas estan 100% seguras y no se modifican)")
-            if client.telegram_token:
-                client.send_telegram(f"anotateBOT: Reintentando materias pendientes -> `{missing_payload}`")
-            
-            for r_idx in range(3):
-                time.sleep(3)
-                r_res = client.enviar_inscripcion(missing_payload)
-                print(f"  [Reintento {r_idx+1}] {r_res['time_ms']} ms | Status: {r_res['status_code']}")
-                if "OK" in r_res['raw_response'] or "0|2" in r_res['raw_response']:
-                    print(f"[✔] Reintento exitoso para materias pendientes!")
-                    if client.telegram_token:
-                        client.send_telegram(f"anotateBOT: Reintento exitoso -> {r_res['raw_response'][:200]}")
-                    break
+            payload = missing_payload
+            print(f"\n[🔄] CICLO CONTINUO: Reintentando materias pendientes: {missing_payload} en 5 segundos...")
+            print("    (Las materias ya conseguidas estan 100% seguras)")
+            time.sleep(5)
+        else:
+            print("\n[🔄] Reintentando refresco de oferta viva en 5 segundos...")
+            time.sleep(5)
 
     # Verificación del comprobante oficial en el servidor de la UTN
     print("\n[+] VERIFICANDO COMPROBANTE OFICIAL DE INSCRIPCION EN UTN...")
@@ -329,6 +330,7 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
             print(f"  • {ins}")
         if client.telegram_token:
             client.send_telegram("🎉 *COMPROBANTE UTN CONFIRMADO EN SERVIDOR*\nPuedes ingresar a Autogestion a descargar tu comprobante en PDF.")
+
 
 
 def cmd_demo(client: UTNInscripcionClient, config: Dict[str, Any]):
