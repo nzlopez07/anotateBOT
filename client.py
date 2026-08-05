@@ -336,11 +336,19 @@ class UTNInscripcionClient:
         resp = self.session.post(url, data=data, headers=headers)
         t_elapsed = (time.perf_counter() - t_start) * 1000 # ms
         
+        # Auto-relogin de seguridad si la sesión de Autogestión caduca tras varias horas
+        if "iniciarSesion" in resp.url or "login" in resp.url.lower():
+            if self.usuario and self.clave:
+                self.login(self.usuario, self.dominio, self.clave)
+                self.init_cursado(self.usuario)
+                resp = self.session.post(url, data=data, headers=headers)
+        
         result = {
             "status_code": resp.status_code,
             "time_ms": round(t_elapsed, 2),
             "raw_response": resp.text
         }
+
         
         try:
             res_json = resp.json()
