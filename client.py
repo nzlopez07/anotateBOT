@@ -59,12 +59,15 @@ class UTNInscripcionClient:
 
     def login(self, usuario: str, dominio: str, clave: str) -> bool:
         """
-        Inicia sesión en la UTN FRC y obtiene las cookies de sesión necesarias.
+        Inicia sesión en la UTN FRC replicando el flujo exacto del navegador:
+        1. POST AJAX a /logon.frc (crea la sesión en el servidor IIS)
+        2. POST formulario a /funciones/sesion/iniciarSesion.frc (SSO redirect a a4)
         """
-        login_url = f"{self.BASE_URL_LOGON}/funciones/sesion/iniciarSesion.frc"
-        payload = {
+        t_val = str(int(time.time() * 1000) % 100000000)
+        
+        base_payload = {
             "userid": "userid",
-            "t": str(int(time.time() * 1000) % 100000000),
+            "t": t_val,
             "page": "login",
             "redir": "/logon.frc",
             "txtUsuario": usuario,
@@ -72,83 +75,164 @@ class UTNInscripcionClient:
             "pwdClave": clave
         }
         
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": f"{self.BASE_URL_LOGON}/logon.frc"
-        }
-
-        response = self.session.post(login_url, data=payload, headers=headers, allow_redirects=True)
+        # Paso 1: POST AJAX a /logon.frc (como lo hace el JS del navegador)
+        ajax_payload = dict(base_payload)
+        ajax_payload["btnEnviar"] = "  Iniciar Sesión  "
+        
+        self.session.post(
+            f"{self.BASE_URL_LOGON}/logon.frc",
+            data=ajax_payload,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.frc.utn.edu.ar",
+                "Referer": f"{self.BASE_URL_LOGON}/logon.frc",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+        )
+        
+        # Paso 2: POST formulario a iniciarSesion.frc (sin X-Requested-With, genera redirect SSO)
+        response = self.session.post(
+            f"{self.BASE_URL_LOGON}/funciones/sesion/iniciarSesion.frc",
+            data=base_payload,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.frc.utn.edu.ar",
+                "Referer": f"{self.BASE_URL_LOGON}/logon.frc",
+            },
+            allow_redirects=True
+        )
         self.sync_server_clock(response.headers)
         
-        # Verificar si la sesión se inició correctamente navegando a Autogestión 4
+        # Verificar que terminamos en a4 (no en www/logon con error)
+        final_url = response.url
+        if "a4.frc.utn.edu.ar" in final_url:
+            return True
+        
+        # Fallback: intentar navegar a a4 directamente
         a4_resp = self.session.get(f"{self.BASE_URL_A4}/", allow_redirects=True)
         self.sync_server_clock(a4_resp.headers)
         
-        if "Logout" in a4_resp.text or "inscripcion" in a4_resp.text.lower() or a4_resp.status_code == 200:
+        if "a4.frc.utn.edu.ar" in a4_resp.url:
             return True
         return False
 
 
+    REFERER_CURSADO = f"{BASE_URL_A4}/tramite/inscripcion/cursado/default.jsp"
+
+    def __init__(self, telegram_token: Optional[str] = None, telegram_chat_id: Optional[str] = None):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
+            "Accept-Language": "es,es-ES;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,es-AR;q=0.5",
+        })
+        self.guid: Optional[str] = None
+        self.materias_cache: List[Dict[str, Any]] = []
+        self.telegram_token = telegram_token
+        self.telegram_chat_id = telegram_chat_id
+        self.server_time_offset: float = 0.0
+        self.a4_token: str = ""
+        self.a4_timestamp: str = ""
+        self.a4_data: str = ""
+
     def init_cursado(self, usuario: str) -> bool:
         """
         Inicializa la sesión de trámite de cursado en Autogestión 4.
+        Carga default.jsp, extrae el idPeticion dinámico y las credenciales A4-Token,
+        A4-TimeStamp y A4-Data requeridas por el servidor.
         """
-        self.session.get(f"{self.BASE_URL_A4}/tramite/inscripcion/cursado/default.jsp")
+        # 1. Cargar la página JSP
+        jsp_resp = self.session.get(self.REFERER_CURSADO)
         
+        # 2. Extraer idPeticion dinámico
+        id_peticion = f"0{usuario}F65BBE75EB7C"  # fallback
+        match_pet = re.search(r"idPeticion\s*=\s*['\"]([0-9A-Fa-f]+)['\"]", jsp_resp.text)
+        if match_pet:
+            id_peticion = match_pet.group(1)
+            
+        # Extraer A4Token, A4TimeStamp y A4Data
+        m_tok = re.search(r"var\s+A4Token\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
+        m_ts = re.search(r"var\s+A4TimeStamp\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
+        m_dt = re.search(r"var\s+A4Data\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
+        
+        if m_tok: self.a4_token = m_tok.group(1)
+        if m_ts: self.a4_timestamp = m_ts.group(1)
+        if m_dt: self.a4_data = m_dt.group(1)
+        
+        ajax_headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://a4.frc.utn.edu.ar",
+            "Referer": self.REFERER_CURSADO,
+            "A4-Token": self.a4_token,
+            "A4-TimeStamp": self.a4_timestamp,
+            "A4-Data": self.a4_data,
+        }
+        
+        # 3. POST init
         init_url = f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/init"
-        id_peticion = f"0{usuario}F65BBE75EB7C"
+        for _ in range(5):
+            init_resp = self.session.post(init_url, data={"idPeticion": id_peticion}, headers=ajax_headers)
+            if init_resp.status_code == 200 and init_resp.text.startswith("2"):
+                break
+            time.sleep(1)
         
-        self.session.post(init_url, data={"idPeticion": id_peticion}, headers={"X-Requested-With": "XMLHttpRequest"})
-        self.session.post(f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/pendientes", headers={"X-Requested-With": "XMLHttpRequest"})
+        # 4. POST pendientes
+        pendientes_headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://a4.frc.utn.edu.ar",
+            "Referer": self.REFERER_CURSADO,
+            "A4-Token": self.a4_token,
+            "A4-TimeStamp": self.a4_timestamp,
+            "A4-Data": self.a4_data,
+        }
+        self.session.post(f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/pendientes", headers=pendientes_headers)
         return True
 
-    def get_comisiones(self, har_fallback_path: str = "www.frc.utn.edu.ar.har") -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    def get_comisiones(self) -> Tuple[Optional[str], List[Dict[str, Any]]]:
         """
         Obtiene la oferta académica (materias y comisiones disponibles) y el GUID.
-        Si la ventana de inscripción aún no está abierta en el servidor en vivo,
-        utiliza la estructura del archivo HAR como fallback para validar el mapeo.
         """
         url = f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/comisiones"
-        headers = {"X-Requested-With": "XMLHttpRequest"}
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": self.REFERER_CURSADO,
+            "A4-Token": self.a4_token,
+            "A4-TimeStamp": self.a4_timestamp,
+            "A4-Data": self.a4_data,
+        }
         
         resp = self.session.get(url, headers=headers)
         if resp.status_code == 200:
-            try:
-                data = resp.json()
-                self.guid = data.get("id")
-                valor_raw = data.get("valor", "")
-                
-                if valor_raw:
-                    if valor_raw.startswith("{") and not valor_raw.startswith("["):
-                        valor_raw = "[" + valor_raw + "]"
-                    self.materias_cache = json.loads(valor_raw)
+            text = resp.text.strip()
+            data = {}
+            if text.startswith("Item [") and text.endswith("]"):
+                inner = text[6:-1]
+                m_id = re.search(r"id=([^,\s]+)", inner)
+                m_val = re.search(r"valor=(.*)", inner, re.DOTALL)
+                if m_id:
+                    data["id"] = m_id.group(1).strip()
+                if m_val:
+                    data["valor"] = m_val.group(1).strip()
+            else:
+                try:
+                    data = resp.json()
+                except Exception:
+                    pass
+                    
+            self.guid = data.get("id")
+            valor_raw = data.get("valor", "")
+            
+            if valor_raw:
+                try:
+                    v_clean = valor_raw.strip()
+                    if not v_clean.startswith("["):
+                        v_clean = "[" + v_clean + "]"
+                    self.materias_cache = json.loads(v_clean)
                     return self.guid, self.materias_cache
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-        # Fallback usando el archivo HAR si el servidor en vivo aún no abrió la consulta
-        try:
-            import os
-            if os.path.exists(har_fallback_path):
-                with open(har_fallback_path, "r", encoding="utf-8", errors="ignore") as f:
-                    har_data = json.load(f)
-                for entry in har_data.get("log", {}).get("entries", []):
-                    if "comisiones" in entry.get("request", {}).get("url", ""):
-                        res_text = entry.get("response", {}).get("content", {}).get("text", "")
-                        if res_text:
-                            data = json.loads(res_text)
-                            self.guid = self.guid or data.get("id")
-                            v_raw = data.get("valor", "")
-                            if v_raw.startswith("{") and not v_raw.startswith("["):
-                                v_raw = "[" + v_raw + "]"
-                            self.materias_cache = json.loads(v_raw)
-                            print("[+] Usando la estructura academica (HAR fallback) para la simulacion.")
-                            return self.guid, self.materias_cache
-
-        except Exception as e:
-            print(f"[!] Error al cargar HAR fallback: {e}")
-
-        return None, []
+        return self.guid, self.materias_cache
 
 
     def refresh_guid(self) -> Optional[str]:
@@ -186,20 +270,15 @@ class UTNInscripcionClient:
                 com_code = parts[0].zfill(3)
                 rest = parts[1].strip()
                 
-                # Algoritmo de mapeo de curso UTN FRC: Año(1-5) + Carrera(K/V) + Comisión + Subcomisión(A/B)
-                m_yr_spec = re.match(r"^([1-5][A-Za-z]+)", rest)
-                if m_yr_spec:
-                    prefix = m_yr_spec.group(1).upper()
-                    try:
-                        sec_num = str(int(com_code))
-                    except ValueError:
-                        sec_num = ""
-                    
-                    has_sublet = ""
-                    sub_match = re.search(r"^[1-5][A-Za-z]+" + re.escape(sec_num) + r"([A-Za-z])", rest)
-                    if sub_match:
-                        has_sublet = sub_match.group(1).upper()
-                    curso_clean = f"{prefix}{sec_num}{has_sublet}"
+                # Extraer curso exacto (ej. "4K2", "4K3A") combinando año/carrera con el número de comisión y subcomisión opcional
+                try:
+                    sec_num = str(int(com_code))
+                except ValueError:
+                    sec_num = ""
+                
+                m_curso = re.match(r"^([1-5][A-Za-z]+" + re.escape(sec_num) + r"[A-Za-z]?)", rest)
+                if m_curso:
+                    curso_clean = m_curso.group(1).upper()
                 else:
                     curso_clean = rest[:4].strip().upper()
 
@@ -250,6 +329,7 @@ class UTNInscripcionClient:
                     words = [w for w in mat_target.split() if len(w) >= 3]
 
                 found_materia = None
+                found_course = False
                 
                 for m in self.materias_cache:
                     m_codigo = m.get("CODIGO", "")
@@ -275,9 +355,7 @@ class UTNInscripcionClient:
                     m_codigo = found_materia.get("CODIGO", "")
                     struct_list = self.parse_structure(found_materia.get("Structure", ""))
                     
-                    found_course = False
                     for curso_target in cursos_target:
-                        # Extraer número de comisión deseada (ej: "4K2" -> "2", "5K4" -> "4", "4K2A" -> "2")
                         m_num = re.search(r"(\d+)(?=[A-Za-z]?$)", curso_target)
                         target_num = m_num.group(1) if m_num else ""
                         
@@ -296,7 +374,7 @@ class UTNInscripcionClient:
                         if found_course:
                             break
                             
-                    # Si no hay estructura disponible en HAR fallback, usar comisión inferida por defecto
+                    # Si no hay estructura disponible, usar comisión inferida por defecto
                     if not found_course and not struct_list:
                         for curso_target in cursos_target:
                             m_num = re.search(r"(\d+)(?=[A-Za-z]?$)", curso_target)
@@ -304,9 +382,19 @@ class UTNInscripcionClient:
                                 com_code = m_num.group(1).zfill(3)
                                 full_code = f"{m_codigo}{com_code}"
                                 codes.append(full_code)
+                                found_course = True
                                 break
+                elif mat_code and len(mat_code) == 11:
+                    for curso_target in cursos_target:
+                        m_num = re.search(r"(\d+)(?=[A-Za-z]?$)", curso_target)
+                        if m_num:
+                            com_code = m_num.group(1).zfill(3)
+                            full_code = f"{mat_code}{com_code}"
+                            codes.append(full_code)
+                            found_course = True
+                            break
 
-                else:
+                if not found_course:
                     print(f"[!] ADVERTENCIA: No se pudo resolver en la oferta actual: {sel}")
 
 
@@ -325,7 +413,12 @@ class UTNInscripcionClient:
         url = f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado"
         headers = {
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest"
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://a4.frc.utn.edu.ar",
+            "Referer": self.REFERER_CURSADO,
+            "A4-Token": self.a4_token,
+            "A4-TimeStamp": self.a4_timestamp,
+            "A4-Data": self.a4_data,
         }
         data = {
             "GUID": self.guid,
@@ -388,18 +481,40 @@ class UTNInscripcionClient:
             return {"value": resp.text}
 
     def verificar_inscripciones_actuales(self, anio: int = 2026) -> List[str]:
-
-
         """
         Consulta a la UTN la lista oficial de materias inscriptas para el año en curso.
         """
+        materias_inscriptas = []
+        
+        # 1. Extraer materias confirmadas del cache de comisiones de la UTN
+        if self.materias_cache:
+            for item in self.materias_cache:
+                inscripto_code = item.get("Inscripto")
+                if inscripto_code:
+                    nombre = item.get("Name", "")
+                    structure = item.get("Structure", "")
+                    struct_parsed = self.parse_structure(structure)
+                    
+                    com_num = inscripto_code[-3:] if len(inscripto_code) >= 3 else ""
+                    curso_str = ""
+                    for st in struct_parsed:
+                        if st["comision_code"] == com_num:
+                            curso_str = f" ({st['curso']})"
+                            break
+                    if not curso_str and struct_parsed:
+                        curso_str = f" ({struct_parsed[0]['curso']})"
+                        
+                    materias_inscriptas.append(f"{nombre}{curso_str}")
+                    
+        if materias_inscriptas:
+            return list(dict.fromkeys(materias_inscriptas))
+
+        # 2. Fallback a endpoint de cursado actual
         url = f"{self.BASE_URL_A4}/cursado/actual/{anio}"
         headers = {"X-Requested-With": "XMLHttpRequest"}
-        resp = self.session.get(url, headers=headers)
-        
-        materias_inscriptas = []
-        if resp.status_code == 200:
-            try:
+        try:
+            resp = self.session.get(url, headers=headers)
+            if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, list):
                     for item in data:
@@ -408,8 +523,8 @@ class UTNInscripcionClient:
                 elif isinstance(data, dict):
                     for k, v in data.items():
                         materias_inscriptas.append(f"{k}: {v}")
-            except Exception:
-                if resp.text:
-                    materias_inscriptas.append("Comprobante emitido correctamente en servidor.")
-        return materias_inscriptas
+        except Exception:
+            pass
+            
+        return list(dict.fromkeys(materias_inscriptas))
 

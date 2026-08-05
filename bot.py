@@ -87,7 +87,7 @@ def parse_server_breakdown(client: UTNInscripcionClient, raw_response: str, conf
 
 
 
-def cmd_list(client: UTNInscripcionClient, config: Dict[str, Any]):
+def cmd_list(client: UTNInscripcionClient, config: Dict[str, Any], watch: bool = False):
     print("\n[+] Autenticando en UTN FRC...")
     if not client.login(config["usuario"], config.get("dominio", "sistemas"), config["clave"]):
         print("[❌] Error de autenticacion. Verifique su legajo y clave.")
@@ -95,35 +95,63 @@ def cmd_list(client: UTNInscripcionClient, config: Dict[str, Any]):
     print("[✔] Login exitoso.")
     
     client.init_cursado(config["usuario"])
-    guid, materias = client.get_comisiones()
     
-    if not materias:
-        print("[!] La consulta en vivo aun no fue abierta por la facultad.")
-        return
-        
-    print(f"\n[✔] Oferta cargada correctamente (GUID: {guid})")
-    print("=" * 65)
-    print(f"{'CODIGO':<12} | {'MATERIA':<35} | {'CURSOS DISPONIBLES'}")
-    print("-" * 65)
+    previous_snapshot = ""
+    cycle = 0
     
-    for m in materias:
-        codigo = m.get("CODIGO", "N/A")
-        nombre = m.get("Name", "N/A")
-        structure = m.get("Structure", "")
-        struct_parsed = client.parse_structure(structure)
+    while True:
+        cycle += 1
+        guid, materias = client.get_comisiones()
         
-        cursos_list = []
-        for st in struct_parsed:
-            c_entry = f"{st['curso']} (Com:{st['comision_code']})"
-            if c_entry not in cursos_list:
-                cursos_list.append(c_entry)
+        if watch:
+            os.system('cls' if os.name == 'nt' else 'clear')
+            print_header()
+            print(f" [ {datetime.now().strftime('%H:%M:%S')} ] | MODO MONITOR CONTINUO (Ciclo #{cycle})")
+            print("=" * 65)
+        
+        if not materias:
+            print("[!] La consulta en vivo aun no fue abierta por la facultad.")
+        else:
+            print(f"[✔] Oferta cargada correctamente (GUID: {guid})")
+            print("=" * 65)
+            print(f"{'CODIGO':<12} | {'MATERIA':<35} | {'CURSOS DISPONIBLES'}")
+            print("-" * 65)
+            
+            current_snapshot_lines = []
+            for m in materias:
+                codigo = m.get("CODIGO", "N/A")
+                nombre = m.get("Name", "N/A")
+                structure = m.get("Structure", "")
+                struct_parsed = client.parse_structure(structure)
                 
-        cursos_str = ", ".join(cursos_list)
-        if len(nombre) > 34:
-            nombre = nombre[:31] + "..."
-        print(f"{codigo:<12} | {nombre:<35} | {cursos_str}")
-        
-    print("=" * 65)
+                cursos_list = []
+                for st in struct_parsed:
+                    c_entry = f"{st['curso']} (Com:{st['comision_code']})"
+                    if c_entry not in cursos_list:
+                        cursos_list.append(c_entry)
+                        
+                cursos_str = ", ".join(cursos_list)
+                current_snapshot_lines.append(f"{codigo} - {nombre}: {cursos_str}")
+                
+                if len(nombre) > 34:
+                    nombre_disp = nombre[:31] + "..."
+                else:
+                    nombre_disp = nombre
+                print(f"{codigo:<12} | {nombre_disp:<35} | {cursos_str}")
+                
+            print("=" * 65)
+            
+            # Alerta a Telegram si cambia la oferta mientras está en modo watch
+            current_snapshot = "\n".join(current_snapshot_lines)
+            if watch and previous_snapshot and current_snapshot != previous_snapshot:
+                if client.telegram_token:
+                    client.send_telegram(f"🔔 *anotateBOT: ¡CAMBIO DETECTADO EN LA OFERTA VIVA!*\nRevisá la consola del bot para ver los nuevos cursos abiertos.")
+            previous_snapshot = current_snapshot
+
+        if not watch:
+            break
+            
+        time.sleep(5)
 
 def cmd_dry_run(client: UTNInscripcionClient, config: Dict[str, Any]):
     print("\n[+] MODO DRY-RUN (Simulacion)")
@@ -257,14 +285,9 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
         shot_count += 1
         shot_time = datetime.now().strftime('%H:%M:%S.%f')[:-3]
         
-        # 1. Enviar ráfaga de reintento
-        results = []
-        for i in range(3):
-            res = client.enviar_inscripcion(payload)
-            results.append(res)
-            time.sleep(0.08)
-
-        res_first = results[0]
+        # 1. Enviar disparo de inscripción limpio
+        client.refresh_guid()
+        res_first = client.enviar_inscripcion(payload)
         
         # 2. Consultar comprobante oficial y materias inscriptas en la UTN
         inscriptas_oficiales = client.verificar_inscripciones_actuales()
@@ -289,11 +312,7 @@ def cmd_sniper(client: UTNInscripcionClient, config: Dict[str, Any], target_time
             for ins in inscriptas_oficiales:
                 print(f"  [✔] {ins}")
         else:
-            print("  [✔] Ingeniería y Calidad de Software (4K2)")
-            print("  [✔] Tecnologías para la Automatización (4K2)")
-            print("  [✔] Seguridad en el Desarrollo de Software (4K3A)")
-            print("  [✔] Investigación Operativa (4K2)")
-            print("  [✔] Administración de Sistemas de Información (4K2)")
+            print("  (Ninguna materia inscripta o confirmada aun)")
             
         print("\nMATERIAS PENDIENTES DE CUPO (Buscando vacante en vivo):")
         if missing_sel:
@@ -431,8 +450,8 @@ def main():
     parser = argparse.ArgumentParser(description="anotateBOT - UTN FRC API HTTP")
     parser.add_argument("modo", choices=["list", "dry-run", "sniper", "demo"], 
                         help="Modo de ejecucion: list, dry-run, sniper, demo")
+    parser.add_argument("--watch", "-w", action="store_true", help="Monitoreo continuo en vivo del listado de materias y comisiones.")
     parser.add_argument("--time", type=str, default=None, help="Hora objetivo para modo sniper (HH:MM:SS). Si se omite, dispara inmediatamente.")
-
     parser.add_argument("--config", type=str, default="config.json", help="Ruta al archivo config.json")
     
     args = parser.parse_args()
@@ -445,7 +464,7 @@ def main():
         client.setup_telegram(telegram_token, telegram_chat_id)
         
     if args.modo == "list":
-        cmd_list(client, config)
+        cmd_list(client, config, watch=args.watch)
     elif args.modo == "dry-run":
         cmd_dry_run(client, config)
     elif args.modo == "sniper":

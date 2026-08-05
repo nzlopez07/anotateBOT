@@ -78,9 +78,15 @@ Edita `config.json` con tus credenciales y las materias a las que deseas anotart
 ## 🚀 Forma de Uso
 
 ### 1. Listar Oferta Académica Limpia
-Consulta la oferta de materias y comisiones habilitadas para tu legajo:
+Consulta la oferta de materias y comisiones habilitadas para tu legajo en vivo:
 ```bash
 python bot.py list
+```
+
+#### 🔄 Modo Monitor Continuo de Vacantes (`--watch` / `-w`)
+Vigila en tiempo real si abren o modifican comisiones. Refresca la tabla cada 5 segundos y **envía una alerta a Telegram si detecta cambios**:
+```bash
+python bot.py list --watch
 ```
 
 ### 2. Simulación de Prueba (Dry-Run)
