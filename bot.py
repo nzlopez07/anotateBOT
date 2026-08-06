@@ -199,6 +199,35 @@ def cmd_schedule(client: UTNInscripcionClient, config: Dict[str, Any], check_tar
                 print(f"   • {b['start_time']} - {b['end_time']} | {mat_short} ({b['curso']})")
     
     print("\n" + "=" * 70)
+    print("📚 OFERTA COMPLETA DE HORARIOS Y COMISIONES DISPONIBLES EN VIVO")
+    print("=" * 70)
+    
+    for m in client.materias_cache:
+        nombre = m.get("Name", "")
+        codigo = m.get("CODIGO", "")
+        structure = m.get("Structure", "")
+        struct_parsed = client.parse_structure(structure)
+        
+        if not struct_parsed:
+            continue
+            
+        print(f"\n📖 {nombre} (Codigo: {codigo}):")
+        
+        # Agrupar por curso/comision
+        by_course = {}
+        for st in struct_parsed:
+            key = (st["curso"], st["comision_code"])
+            by_course.setdefault(key, []).append(st)
+            
+        for (c_name, c_code), blocks in by_course.items():
+            times_str = []
+            for b in blocks:
+                if b["start_time"]:
+                    times_str.append(f"{b['day_name']} {b['start_time']}-{b['end_time']}")
+            sched_display = " | ".join(times_str) if times_str else "(Sin horario decodificado)"
+            print(f"   • Curso {c_name} (Comisión {c_code}): {sched_display}")
+            
+    print("\n" + "=" * 70)
     
     # Si el usuario solicitó verificar la compatibilidad de un curso candidato
     if check_target:
