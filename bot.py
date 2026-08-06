@@ -185,113 +185,116 @@ def cmd_schedule(client: UTNInscripcionClient, config: Dict[str, Any], check_tar
             print(f" [ {datetime.now().strftime('%H:%M:%S')} ] | MODO MONITOR CONTINUO DE HORARIOS (Ciclo #{cycle})")
             print("=" * 70)
     
-    inscriptos = client.get_horarios_inscriptos()
-    if not inscriptos:
-        print("[!] No se encontraron materias inscriptas o la oferta no está cargada.")
-        return
-
-    # Organizar bloques por día
-    days_order = [(1, "LUNES"), (2, "MARTES"), (3, "MIÉRCOLES"), (4, "JUEVES"), (5, "VIERNES"), (6, "SÁBADO")]
-    
-    print("\n" + "=" * 70)
-    print("📅 AGENDA SEMANAL OFICIAL (MATERIA INCRIPTAS)")
-    print("=" * 70)
-    
-    for d_num, d_name in days_order:
-        day_blocks = [b for b in inscriptos if b["day_num"] == d_num]
-        print(f"\n📌 {d_name}:")
-        if not day_blocks:
-            print("   (Libre)")
-        else:
-            day_blocks.sort(key=lambda x: x["start_mins"])
-            for b in day_blocks:
-                mat_short = b["materia"][:35]
-                print(f"   • {b['start_time']} - {b['end_time']} | {mat_short} ({b['curso']})")
-    
-    print("\n" + "=" * 70)
-    print("📚 OFERTA COMPLETA DE HORARIOS Y COMISIONES DISPONIBLES EN VIVO")
-    print("=" * 70)
-    
-    for m in client.materias_cache:
-        nombre = m.get("Name", "")
-        codigo = m.get("CODIGO", "")
-        structure = m.get("Structure", "")
-        struct_parsed = client.parse_structure(structure)
-        
-        if not struct_parsed:
+        inscriptos = client.get_horarios_inscriptos()
+        if not inscriptos:
+            print("[!] No se encontraron materias inscriptas o la oferta no está cargada.")
+            if not watch:
+                break
+            time.sleep(5)
             continue
-            
-        print(f"\n📖 {nombre} (Codigo: {codigo}):")
+
+        # Organizar bloques por día
+        days_order = [(1, "LUNES"), (2, "MARTES"), (3, "MIÉRCOLES"), (4, "JUEVES"), (5, "VIERNES"), (6, "SÁBADO")]
         
-        # Agrupar por curso/comision
-        by_course = {}
-        for st in struct_parsed:
-            key = (st["curso"], st["comision_code"])
-            by_course.setdefault(key, []).append(st)
-            
-        for (c_name, c_code), blocks in by_course.items():
-            times_str = []
-            for b in blocks:
-                if b["start_time"]:
-                    times_str.append(f"{b['day_name']} {b['start_time']}-{b['end_time']}")
-            sched_display = " | ".join(times_str) if times_str else "(Sin horario decodificado)"
-            print(f"   • Curso {c_name} (Comisión {c_code}): {sched_display}")
-            
-    print("\n" + "=" * 70)
-    
-    # Si el usuario solicitó verificar la compatibilidad de un curso candidato
-    if check_target:
-        print(f"\n🔍 EVALUANDO SOLAPAMIENTO DE HORARIOS PARA: '{check_target}'")
-        print("-" * 70)
+        print("\n" + "=" * 70)
+        print("📅 AGENDA SEMANAL OFICIAL (MATERIA INCRIPTAS)")
+        print("=" * 70)
         
-        candidates = []
+        for d_num, d_name in days_order:
+            day_blocks = [b for b in inscriptos if b["day_num"] == d_num]
+            print(f"\n📌 {d_name}:")
+            if not day_blocks:
+                print("   (Libre)")
+            else:
+                day_blocks.sort(key=lambda x: x["start_mins"])
+                for b in day_blocks:
+                    mat_short = b["materia"][:35]
+                    print(f"   • {b['start_time']} - {b['end_time']} | {mat_short} ({b['curso']})")
+        
+        print("\n" + "=" * 70)
+        print("📚 OFERTA COMPLETA DE HORARIOS Y COMISIONES DISPONIBLES EN VIVO")
+        print("=" * 70)
+        
         for m in client.materias_cache:
-            m_nombre = m.get("Name", "")
-            m_code = m.get("CODIGO", "")
+            nombre = m.get("Name", "")
+            codigo = m.get("CODIGO", "")
             structure = m.get("Structure", "")
             struct_parsed = client.parse_structure(structure)
             
+            if not struct_parsed:
+                continue
+                
+            print(f"\n📖 {nombre} (Codigo: {codigo}):")
+            
+            # Agrupar por curso/comision
+            by_course = {}
             for st in struct_parsed:
-                if (check_target.upper() in st["curso"].upper() or check_target.lower() in m_nombre.lower() or check_target == m_code) and st["start_time"]:
-                    candidates.append({
-                        "materia": m_nombre,
-                        "curso": st["curso"],
-                        "comision_code": st["comision_code"],
-                        "day_num": st["day_num"],
-                        "day_name": st["day_name"],
-                        "start_time": st["start_time"],
-                        "end_time": st["end_time"],
-                        "start_mins": st["start_mins"],
-                        "end_mins": st["end_mins"]
-                    })
-                    
-        if not candidates:
-            print(f"[!] No se encontraron horarios para '{check_target}' en la oferta viva.")
-        else:
-            # Agrupar candidatos por materia y curso
-            grouped = {}
-            for c in candidates:
-                key = (c["materia"], c["curso"], c["comision_code"])
-                grouped.setdefault(key, []).append(c)
+                key = (st["curso"], st["comision_code"])
+                by_course.setdefault(key, []).append(st)
                 
-            for (m_nom, c_cur, c_code), blocks in grouped.items():
-                print(f"\n👉 Candidata: {m_nom} | Curso: {c_cur} (Comision {c_code})")
-                has_conflict = False
+            for (c_name, c_code), blocks in by_course.items():
+                times_str = []
+                for b in blocks:
+                    if b["start_time"]:
+                        times_str.append(f"{b['day_name']} {b['start_time']}-{b['end_time']}")
+                sched_display = " | ".join(times_str) if times_str else "(Sin horario decodificado)"
+                print(f"   • Curso {c_name} (Comisión {c_code}): {sched_display}")
                 
-                for cb in blocks:
-                    print(f"   Horario: {cb['day_name']} {cb['start_time']} - {cb['end_time']}")
+        print("\n" + "=" * 70)
+        
+        # Si el usuario solicitó verificar la compatibilidad de un curso candidato
+        if check_target:
+            print(f"\n🔍 EVALUANDO SOLAPAMIENTO DE HORARIOS PARA: '{check_target}'")
+            print("-" * 70)
+            
+            candidates = []
+            for m in client.materias_cache:
+                m_nombre = m.get("Name", "")
+                m_code = m.get("CODIGO", "")
+                structure = m.get("Structure", "")
+                struct_parsed = client.parse_structure(structure)
+                
+                for st in struct_parsed:
+                    if (check_target.upper() in st["curso"].upper() or check_target.lower() in m_nombre.lower() or check_target == m_code) and st["start_time"]:
+                        candidates.append({
+                            "materia": m_nombre,
+                            "curso": st["curso"],
+                            "comision_code": st["comision_code"],
+                            "day_num": st["day_num"],
+                            "day_name": st["day_name"],
+                            "start_time": st["start_time"],
+                            "end_time": st["end_time"],
+                            "start_mins": st["start_mins"],
+                            "end_mins": st["end_mins"]
+                        })
+                        
+            if not candidates:
+                print(f"[!] No se encontraron horarios para '{check_target}' en la oferta viva.")
+            else:
+                # Agrupar candidatos por materia y curso
+                grouped = {}
+                for c in candidates:
+                    key = (c["materia"], c["curso"], c["comision_code"])
+                    grouped.setdefault(key, []).append(c)
                     
-                    # Buscar choques con materias inscriptas
-                    for ib in inscriptos:
-                        if ib["day_num"] == cb["day_num"]:
-                            # Verificar solapamiento de rangos [start, end]
-                            if max(cb["start_mins"], ib["start_mins"]) < min(cb["end_mins"], ib["end_mins"]):
-                                has_conflict = True
-                                print(f"   ⚠️  [CHOQUE/SOLAPAMIENTO] Con: {ib['materia']} ({ib['curso']}) [{ib['start_time']} - {ib['end_time']}]")
-                                
-                if not has_conflict:
-                    print("   ✅ ¡HORARIO COMPATIBLE! No tiene solapamientos con tus materias actuales.")
-            print("\n" + "=" * 70)
+                for (m_nom, c_cur, c_code), blocks in grouped.items():
+                    print(f"\n👉 Candidata: {m_nom} | Curso: {c_cur} (Comision {c_code})")
+                    has_conflict = False
+                    
+                    for cb in blocks:
+                        print(f"   Horario: {cb['day_name']} {cb['start_time']} - {cb['end_time']}")
+                        
+                        # Buscar choques con materias inscriptas
+                        for ib in inscriptos:
+                            if ib["day_num"] == cb["day_num"]:
+                                # Verificar solapamiento de rangos [start, end]
+                                if max(cb["start_mins"], ib["start_mins"]) < min(cb["end_mins"], ib["end_mins"]):
+                                    has_conflict = True
+                                    print(f"   ⚠️  [CHOQUE/SOLAPAMIENTO] Con: {ib['materia']} ({ib['curso']}) [{ib['start_time']} - {ib['end_time']}]")
+                                    
+                    if not has_conflict:
+                        print("   ✅ ¡HORARIO COMPATIBLE! No tiene solapamientos con tus materias actuales.")
+                print("\n" + "=" * 70)
 
         if not watch:
             break
