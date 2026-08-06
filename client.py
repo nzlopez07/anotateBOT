@@ -63,58 +63,66 @@ class UTNInscripcionClient:
         1. POST AJAX a /logon.frc (crea la sesión en el servidor IIS)
         2. POST formulario a /funciones/sesion/iniciarSesion.frc (SSO redirect a a4)
         """
-        t_val = str(int(time.time() * 1000) % 100000000)
-        
-        base_payload = {
-            "userid": "userid",
-            "t": t_val,
-            "page": "login",
-            "redir": "/logon.frc",
-            "txtUsuario": usuario,
-            "txtDominios": dominio,
-            "pwdClave": clave
-        }
-        
-        # Paso 1: POST AJAX a /logon.frc (como lo hace el JS del navegador)
-        ajax_payload = dict(base_payload)
-        ajax_payload["btnEnviar"] = "  Iniciar Sesión  "
-        
-        self.session.post(
-            f"{self.BASE_URL_LOGON}/logon.frc",
-            data=ajax_payload,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": "https://www.frc.utn.edu.ar",
-                "Referer": f"{self.BASE_URL_LOGON}/logon.frc",
-                "X-Requested-With": "XMLHttpRequest",
+        try:
+            t_val = str(int(time.time() * 1000) % 100000000)
+            
+            base_payload = {
+                "userid": "userid",
+                "t": t_val,
+                "page": "login",
+                "redir": "/logon.frc",
+                "txtUsuario": usuario,
+                "txtDominios": dominio,
+                "pwdClave": clave
             }
-        )
-        
-        # Paso 2: POST formulario a iniciarSesion.frc (sin X-Requested-With, genera redirect SSO)
-        response = self.session.post(
-            f"{self.BASE_URL_LOGON}/funciones/sesion/iniciarSesion.frc",
-            data=base_payload,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": "https://www.frc.utn.edu.ar",
-                "Referer": f"{self.BASE_URL_LOGON}/logon.frc",
-            },
-            allow_redirects=True
-        )
-        self.sync_server_clock(response.headers)
-        
-        # Verificar que terminamos en a4 (no en www/logon con error)
-        final_url = response.url
-        if "a4.frc.utn.edu.ar" in final_url:
-            return True
-        
-        # Fallback: intentar navegar a a4 directamente
-        a4_resp = self.session.get(f"{self.BASE_URL_A4}/", allow_redirects=True)
-        self.sync_server_clock(a4_resp.headers)
-        
-        if "a4.frc.utn.edu.ar" in a4_resp.url:
-            return True
-        return False
+            
+            # Paso 1: POST AJAX a /logon.frc (como lo hace el JS del navegador)
+            ajax_payload = dict(base_payload)
+            ajax_payload["btnEnviar"] = "  Iniciar Sesión  "
+            
+            try:
+                self.session.post(
+                    f"{self.BASE_URL_LOGON}/logon.frc",
+                    data=ajax_payload,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Origin": "https://www.frc.utn.edu.ar",
+                        "Referer": f"{self.BASE_URL_LOGON}/logon.frc",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    timeout=8
+                )
+            except Exception:
+                pass
+            
+            # Paso 2: POST formulario a iniciarSesion.frc (sin X-Requested-With, genera redirect SSO)
+            response = self.session.post(
+                f"{self.BASE_URL_LOGON}/funciones/sesion/iniciarSesion.frc",
+                data=base_payload,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Origin": "https://www.frc.utn.edu.ar",
+                    "Referer": f"{self.BASE_URL_LOGON}/logon.frc",
+                },
+                allow_redirects=True,
+                timeout=10
+            )
+            self.sync_server_clock(response.headers)
+            
+            # Verificar que terminamos en a4 (no en www/logon con error)
+            final_url = response.url
+            if "a4.frc.utn.edu.ar" in final_url:
+                return True
+            
+            # Fallback: intentar navegar a a4 directamente
+            a4_resp = self.session.get(f"{self.BASE_URL_A4}/", allow_redirects=True, timeout=10)
+            self.sync_server_clock(a4_resp.headers)
+            
+            if "a4.frc.utn.edu.ar" in a4_resp.url:
+                return True
+            return False
+        except Exception:
+            return False
 
 
     REFERER_CURSADO = f"{BASE_URL_A4}/tramite/inscripcion/cursado/default.jsp"
@@ -140,53 +148,59 @@ class UTNInscripcionClient:
         Carga default.jsp, extrae el idPeticion dinámico y las credenciales A4-Token,
         A4-TimeStamp y A4-Data requeridas por el servidor.
         """
-        # 1. Cargar la página JSP
-        jsp_resp = self.session.get(self.REFERER_CURSADO)
-        
-        # 2. Extraer idPeticion dinámico
-        id_peticion = f"0{usuario}F65BBE75EB7C"  # fallback
-        match_pet = re.search(r"idPeticion\s*=\s*['\"]([0-9A-Fa-f]+)['\"]", jsp_resp.text)
-        if match_pet:
-            id_peticion = match_pet.group(1)
+        try:
+            # 1. Cargar la página JSP
+            jsp_resp = self.session.get(self.REFERER_CURSADO, timeout=10)
             
-        # Extraer A4Token, A4TimeStamp y A4Data
-        m_tok = re.search(r"var\s+A4Token\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
-        m_ts = re.search(r"var\s+A4TimeStamp\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
-        m_dt = re.search(r"var\s+A4Data\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
-        
-        if m_tok: self.a4_token = m_tok.group(1)
-        if m_ts: self.a4_timestamp = m_ts.group(1)
-        if m_dt: self.a4_data = m_dt.group(1)
-        
-        ajax_headers = {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "https://a4.frc.utn.edu.ar",
-            "Referer": self.REFERER_CURSADO,
-            "A4-Token": self.a4_token,
-            "A4-TimeStamp": self.a4_timestamp,
-            "A4-Data": self.a4_data,
-        }
-        
-        # 3. POST init
-        init_url = f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/init"
-        for _ in range(5):
-            init_resp = self.session.post(init_url, data={"idPeticion": id_peticion}, headers=ajax_headers)
-            if init_resp.status_code == 200 and init_resp.text.startswith("2"):
-                break
-            time.sleep(1)
-        
-        # 4. POST pendientes
-        pendientes_headers = {
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "https://a4.frc.utn.edu.ar",
-            "Referer": self.REFERER_CURSADO,
-            "A4-Token": self.a4_token,
-            "A4-TimeStamp": self.a4_timestamp,
-            "A4-Data": self.a4_data,
-        }
-        self.session.post(f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/pendientes", headers=pendientes_headers)
-        return True
+            # 2. Extraer idPeticion dinámico
+            id_peticion = f"0{usuario}F65BBE75EB7C"  # fallback
+            match_pet = re.search(r"idPeticion\s*=\s*['\"]([0-9A-Fa-f]+)['\"]", jsp_resp.text)
+            if match_pet:
+                id_peticion = match_pet.group(1)
+                
+            # Extraer A4Token, A4TimeStamp y A4Data
+            m_tok = re.search(r"var\s+A4Token\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
+            m_ts = re.search(r"var\s+A4TimeStamp\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
+            m_dt = re.search(r"var\s+A4Data\s*=\s*['\"]([^'\"]+)['\"]", jsp_resp.text)
+            
+            if m_tok: self.a4_token = m_tok.group(1)
+            if m_ts: self.a4_timestamp = m_ts.group(1)
+            if m_dt: self.a4_data = m_dt.group(1)
+            
+            ajax_headers = {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": "https://a4.frc.utn.edu.ar",
+                "Referer": self.REFERER_CURSADO,
+                "A4-Token": self.a4_token,
+                "A4-TimeStamp": self.a4_timestamp,
+                "A4-Data": self.a4_data,
+            }
+            
+            # 3. POST init
+            init_url = f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/init"
+            for _ in range(5):
+                try:
+                    init_resp = self.session.post(init_url, data={"idPeticion": id_peticion}, headers=ajax_headers, timeout=5)
+                    if init_resp.status_code == 200 and init_resp.text.startswith("2"):
+                        break
+                except Exception:
+                    pass
+                time.sleep(1)
+            
+            # 4. POST pendientes
+            pendientes_headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": "https://a4.frc.utn.edu.ar",
+                "Referer": self.REFERER_CURSADO,
+                "A4-Token": self.a4_token,
+                "A4-TimeStamp": self.a4_timestamp,
+                "A4-Data": self.a4_data,
+            }
+            self.session.post(f"{self.BASE_URL_A4}/transacciones/inscripcion/cursado/pendientes", headers=pendientes_headers, timeout=5)
+            return True
+        except Exception:
+            return False
 
     def get_comisiones(self) -> Tuple[Optional[str], List[Dict[str, Any]]]:
         """
@@ -201,36 +215,39 @@ class UTNInscripcionClient:
             "A4-Data": self.a4_data,
         }
         
-        resp = self.session.get(url, headers=headers)
-        if resp.status_code == 200:
-            text = resp.text.strip()
-            data = {}
-            if text.startswith("Item [") and text.endswith("]"):
-                inner = text[6:-1]
-                m_id = re.search(r"id=([^,\s]+)", inner)
-                m_val = re.search(r"valor=(.*)", inner, re.DOTALL)
-                if m_id:
-                    data["id"] = m_id.group(1).strip()
-                if m_val:
-                    data["valor"] = m_val.group(1).strip()
-            else:
-                try:
-                    data = resp.json()
-                except Exception:
-                    pass
-                    
-            self.guid = data.get("id")
-            valor_raw = data.get("valor", "")
-            
-            if valor_raw:
-                try:
-                    v_clean = valor_raw.strip()
-                    if not v_clean.startswith("["):
-                        v_clean = "[" + v_clean + "]"
-                    self.materias_cache = json.loads(v_clean)
-                    return self.guid, self.materias_cache
-                except Exception:
-                    pass
+        try:
+            resp = self.session.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                data = {}
+                if text.startswith("Item [") and text.endswith("]"):
+                    inner = text[6:-1]
+                    m_id = re.search(r"id=([^,\s]+)", inner)
+                    m_val = re.search(r"valor=(.*)", inner, re.DOTALL)
+                    if m_id:
+                        data["id"] = m_id.group(1).strip()
+                    if m_val:
+                        data["valor"] = m_val.group(1).strip()
+                else:
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        pass
+                        
+                self.guid = data.get("id")
+                valor_raw = data.get("valor", "")
+                
+                if valor_raw:
+                    try:
+                        v_clean = valor_raw.strip()
+                        if not v_clean.startswith("["):
+                            v_clean = "[" + v_clean + "]"
+                        self.materias_cache = json.loads(v_clean)
+                        return self.guid, self.materias_cache
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         return self.guid, self.materias_cache
 
@@ -238,17 +255,18 @@ class UTNInscripcionClient:
     def refresh_guid(self) -> Optional[str]:
         """
         Solicita un GUID nuevo y actualizado antes de enviar la inscripción.
+        Maneja errores de red sin romper la ejecución del bot.
         """
         url = f"{self.BASE_URL_A4}/transacciones/guid"
         headers = {"X-Requested-With": "XMLHttpRequest"}
-        resp = self.session.get(url, headers=headers)
-        if resp.status_code == 200:
-            try:
+        try:
+            resp = self.session.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
                 data = resp.json()
                 self.guid = data.get("Guid")
                 return self.guid
-            except Exception:
-                pass
+        except Exception:
+            pass
         return self.guid
 
     def parse_structure(self, structure_str: str) -> List[Dict[str, str]]:
