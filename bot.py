@@ -165,7 +165,7 @@ def cmd_list(client: UTNInscripcionClient, config: Dict[str, Any], watch: bool =
             
         time.sleep(5)
 
-def cmd_schedule(client: UTNInscripcionClient, config: Dict[str, Any], check_target: Optional[str] = None):
+def cmd_schedule(client: UTNInscripcionClient, config: Dict[str, Any], check_target: Optional[str] = None, watch: bool = False):
     print("\n[+] Autenticando en UTN FRC...")
     if not client.login(config["usuario"], config.get("dominio", "sistemas"), config["clave"]):
         print("[❌] Error de autenticacion.")
@@ -173,7 +173,17 @@ def cmd_schedule(client: UTNInscripcionClient, config: Dict[str, Any], check_tar
     print("[✔] Login exitoso.")
     
     client.init_cursado(config["usuario"])
-    client.get_comisiones()
+    
+    cycle = 0
+    while True:
+        cycle += 1
+        client.get_comisiones()
+        
+        if watch:
+            os.system('cls' if os.name == 'nt' else 'clear')
+            print_header()
+            print(f" [ {datetime.now().strftime('%H:%M:%S')} ] | MODO MONITOR CONTINUO DE HORARIOS (Ciclo #{cycle})")
+            print("=" * 70)
     
     inscriptos = client.get_horarios_inscriptos()
     if not inscriptos:
@@ -282,6 +292,10 @@ def cmd_schedule(client: UTNInscripcionClient, config: Dict[str, Any], check_tar
                 if not has_conflict:
                     print("   ✅ ¡HORARIO COMPATIBLE! No tiene solapamientos con tus materias actuales.")
             print("\n" + "=" * 70)
+
+        if not watch:
+            break
+        time.sleep(5)
 
 def cmd_dry_run(client: UTNInscripcionClient, config: Dict[str, Any]):
     print("\n[+] MODO DRY-RUN (Simulacion)")
@@ -597,7 +611,7 @@ def main():
     if args.modo == "list":
         cmd_list(client, config, watch=args.watch)
     elif args.modo == "schedule":
-        cmd_schedule(client, config, check_target=args.check)
+        cmd_schedule(client, config, check_target=args.check, watch=args.watch)
     elif args.modo == "dry-run":
         cmd_dry_run(client, config)
     elif args.modo == "sniper":
