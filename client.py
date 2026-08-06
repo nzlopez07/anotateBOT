@@ -281,14 +281,79 @@ class UTNInscripcionClient:
                     curso_clean = m_curso.group(1).upper()
                 else:
                     curso_clean = rest[:4].strip().upper()
+                
+                # Extraer bloque de horario: [CURSO][DÍA_1_DIGITO][HHMM_4_DIGITOS][DURACION_MIN_3_DIGITOS]
+                day_num = 0
+                day_name = ""
+                start_time = ""
+                end_time = ""
+                start_mins = 0
+                end_mins = 0
+                
+                m_sched = re.match(r"^" + re.escape(curso_clean) + r"(\d)(\d{4})(\d{3})", rest)
+                if m_sched:
+                    d_code = m_sched.group(1)
+                    st_hhmm = m_sched.group(2)
+                    dur_m = int(m_sched.group(3))
+                    
+                    days_map = {"1": "Lun", "2": "Mar", "3": "Mié", "4": "Jue", "5": "Vie", "6": "Sáb", "7": "Dom"}
+                    day_num = int(d_code)
+                    day_name = days_map.get(d_code, f"D{d_code}")
+                    
+                    sh = int(st_hhmm[:2])
+                    sm = int(st_hhmm[2:])
+                    start_mins = sh * 60 + sm
+                    end_mins = start_mins + dur_m
+                    
+                    eh = end_mins // 60
+                    em = end_mins % 60
+                    start_time = f"{sh:02d}:{sm:02d}"
+                    end_time = f"{eh:02d}:{em:02d}"
 
                 res.append({
                     "comision_code": com_code,
                     "curso": curso_clean,
                     "rest": rest,
-                    "raw": item_clean
+                    "raw": item_clean,
+                    "day_num": day_num,
+                    "day_name": day_name,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "start_mins": start_mins,
+                    "end_mins": end_mins
                 })
         return res
+
+    def get_horarios_inscriptos(self) -> List[Dict[str, Any]]:
+        """
+        Retorna la lista de bloques de horario de todas las materias en las que el alumno está inscripto.
+        """
+        inscriptos_schedules = []
+        if not self.materias_cache:
+            return inscriptos_schedules
+            
+        for item in self.materias_cache:
+            inscripto_code = item.get("Inscripto")
+            if inscripto_code:
+                nombre = item.get("Name", "")
+                structure = item.get("Structure", "")
+                struct_parsed = self.parse_structure(structure)
+                
+                com_num = inscripto_code[-3:] if len(inscripto_code) >= 3 else ""
+                for st in struct_parsed:
+                    if st["comision_code"] == com_num and st["start_time"]:
+                        inscriptos_schedules.append({
+                            "materia": nombre,
+                            "curso": st["curso"],
+                            "comision_code": st["comision_code"],
+                            "day_num": st["day_num"],
+                            "day_name": st["day_name"],
+                            "start_time": st["start_time"],
+                            "end_time": st["end_time"],
+                            "start_mins": st["start_mins"],
+                            "end_mins": st["end_mins"]
+                        })
+        return inscriptos_schedules
 
     def resolve_materia_payload(self, comisiones_seleccionadas: List[Any]) -> str:
         """
